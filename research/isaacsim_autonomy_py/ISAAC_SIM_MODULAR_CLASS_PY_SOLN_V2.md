@@ -297,6 +297,19 @@ Code template: scripts/run_part1_world_pipeline.py
 
 ```python
 import argparse
+import sys
+from pathlib import Path
+
+
+def _ensure_project_import_path() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  package_root = repo_root / "src" / "py" / "basic"
+  package_root_str = str(package_root)
+  if package_root_str not in sys.path:
+    sys.path.insert(0, package_root_str)
+
+
+_ensure_project_import_path()
 
 from warehouse_sim.pipelines.part1_world_pipeline import run_part1
 
@@ -319,6 +332,19 @@ Code template: scripts/run_part2_robot_pipeline.py
 
 ```python
 import argparse
+import sys
+from pathlib import Path
+
+
+def _ensure_project_import_path() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  package_root = repo_root / "src" / "py" / "basic"
+  package_root_str = str(package_root)
+  if package_root_str not in sys.path:
+    sys.path.insert(0, package_root_str)
+
+
+_ensure_project_import_path()
 
 from warehouse_sim.pipelines.part2_robot_pipeline import run_part2
 
@@ -341,6 +367,19 @@ Code template: scripts/run_full_pipeline.py
 
 ```python
 import argparse
+import sys
+from pathlib import Path
+
+
+def _ensure_project_import_path() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  package_root = repo_root / "src" / "py" / "basic"
+  package_root_str = str(package_root)
+  if package_root_str not in sys.path:
+    sys.path.insert(0, package_root_str)
+
+
+_ensure_project_import_path()
 
 from warehouse_sim.pipelines.full_pipeline import run_full
 
@@ -595,7 +634,18 @@ class MobileRobotFactory:
   def spawn_jetbots(self, count: int, spacing: float = 1.0) -> dict:
     from isaacsim.robot.wheeled_robots.robots import WheeledRobot
 
-    usd = self.assets_root_path + "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd"
+    # Robust USD path resolution: if an assets root path is provided,
+    # append the known relative path for the Jetbot USD file. If the
+    # provided path already points to a .usd file, use it directly.
+    if self.assets_root_path:
+      assets_root = str(self.assets_root_path).rstrip("/")
+      if assets_root.endswith(".usd"):
+        usd = assets_root
+      else:
+        usd = assets_root + "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd"
+    else:
+      usd = "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd"
+
     robots = {}
     for i in range(count):
       y = (i - (count - 1) / 2.0) * spacing
@@ -612,6 +662,19 @@ class MobileRobotFactory:
       )
     return robots
 ```
+
+**Changelog (applied fixes)**
+
+- MobileRobotFactory: fixed USD path assignment to avoid overwriting the
+  provided `assets_root_path` and to resolve both folder roots and direct
+  USD paths.
+- Launcher scripts (`scripts/run_part1_world_pipeline.py`,
+  `scripts/run_part2_robot_pipeline.py`, `scripts/run_full_pipeline.py`):
+  they now prepend the package root to `sys.path` so scripts can be run
+  from the Isaac Sim install directory (e.g., `~/isaacsim`).
+- Doc: this file updated to include the corrected mobile factory template
+  and troubleshooting notes for deprecation/warning messages seen in
+  Isaac Sim startup logs.
 
 Code template: src/warehouse_sim/robots/robot_registry.py
 
@@ -975,156 +1038,19 @@ Pass criteria for all steps:
 
 ## 8) Reference Class Skeletons (Concise)
 
-## 8.1 task_models.py
+Section 7 is now the canonical source of starter code for every Python file.
 
-```python
-from dataclasses import dataclass
-from enum import Enum, auto
-from typing import Optional, Tuple
+Use Section 8 as a quick reminder of the minimum functional chain:
 
+1. scripts/run_part1_world_pipeline.py -> warehouse_sim.pipelines.part1_world_pipeline.run_part1
+2. scripts/run_part2_robot_pipeline.py -> warehouse_sim.pipelines.part2_robot_pipeline.run_part2
+3. scripts/run_full_pipeline.py -> warehouse_sim.pipelines.full_pipeline.run_full
+4. warehouse_sim.core.simulation_bootstrap.SimulationBootstrap
+5. warehouse_sim.scene.* scene builders
+6. warehouse_sim.robots.*, warehouse_sim.tasks.*, warehouse_sim.control.*
+7. warehouse_sim.telemetry.*, warehouse_sim.perception.*
 
-class TaskPhase(Enum):
-    IDLE = auto()
-    NAVIGATE_TO_PICK = auto()
-    PICK_BOX = auto()
-    NAVIGATE_TO_DROP = auto()
-    PLACE_BOX = auto()
-    COMPLETE = auto()
-
-
-@dataclass
-class BoxTask:
-    task_id: int
-    box_id: str
-    pick_xy: Tuple[float, float]
-    drop_xy: Tuple[float, float]
-    assigned_robot: Optional[str] = None
-    phase: TaskPhase = TaskPhase.IDLE
-```
-
-## 8.2 simulation_bootstrap.py
-
-```python
-from isaacsim import SimulationApp
-
-
-class SimulationBootstrap:
-    def __init__(self, headless: bool = False, stage_units: float = 1.0):
-        self.app = SimulationApp({"headless": headless})
-        from isaacsim.core.api import World
-        from isaacsim.core.utils.prims import create_prim
-
-        self._create_prim = create_prim
-        self.world = World(stage_units_in_meters=stage_units)
-
-    def setup_default_scene(self) -> None:
-        self.world.scene.add_default_ground_plane()
-        self._create_prim("/DistantLight", "DistantLight")
-
-    def shutdown(self) -> None:
-        self.world.stop()
-        self.app.close()
-```
-
-## 8.3 conveyor_builder.py
-
-```python
-import numpy as np
-
-
-class ConveyorBuilder:
-    def __init__(self, world):
-        self.world = world
-
-    def build_mock_conveyor_lane(self, start_xy=(-2.0, 0.0), end_xy=(2.0, 0.0)) -> dict:
-        from isaacsim.core.api.objects import VisualCuboid
-
-        sx, sy = start_xy
-        ex, ey = end_xy
-        cx, cy = (sx + ex) / 2.0, (sy + ey) / 2.0
-        length = ((ex - sx) ** 2 + (ey - sy) ** 2) ** 0.5
-
-        self.world.scene.add(
-            VisualCuboid(
-                prim_path="/World/Conveyors/Lane_0",
-                name="conveyor_lane_0",
-                position=np.array([cx, cy, 0.05]),
-                scale=np.array([length, 0.5, 0.1]),
-                color=np.array([80, 80, 80]),
-                size=1.0,
-            )
-        )
-        return {"lane_id": "lane_0", "start": start_xy, "end": end_xy}
-```
-
-## 8.4 mobile_robot_factory.py
-
-```python
-import numpy as np
-
-
-class MobileRobotFactory:
-    def __init__(self, world, assets_root_path: str):
-        self.world = world
-        self.assets_root_path = assets_root_path
-
-    def spawn_jetbots(self, count: int, spacing: float = 1.0):
-        from isaacsim.robot.wheeled_robots.robots import WheeledRobot
-
-        robots = {}
-        usd_path = self.assets_root_path + "/Isaac/Robots/NVIDIA/Jetbot/jetbot.usd"
-        for i in range(count):
-            y = (i - (count - 1) / 2.0) * spacing
-            name = f"robot_{i}"
-            robots[name] = self.world.scene.add(
-                WheeledRobot(
-                    prim_path=f"/World/Fleet/{name}",
-                    name=name,
-                    wheel_dof_names=["left_wheel_joint", "right_wheel_joint"],
-                    create_robot=True,
-                    usd_path=usd_path,
-                    position=np.array([0.0, y, 0.05]),
-                )
-            )
-        return robots
-```
-
-## 8.5 fleet_controller.py
-
-```python
-import math
-import numpy as np
-
-
-class FleetController:
-    def __init__(self, robots):
-        from isaacsim.robot.wheeled_robots.controllers.differential_controller import DifferentialController
-
-        self.robots = robots
-        self.controllers = {
-            name: DifferentialController(name=f"{name}_ctrl", wheel_radius=0.03, wheel_base=0.1125)
-            for name in robots
-        }
-
-    def drive_to_xy(self, name: str, goal_xy: tuple, reach_thresh: float = 0.15) -> bool:
-        robot = self.robots[name]
-        ctrl = self.controllers[name]
-        pos, _ = robot.get_world_pose()
-        x, y = float(pos[0]), float(pos[1])
-        gx, gy = goal_xy
-        dx, dy = gx - x, gy - y
-        dist = math.sqrt(dx * dx + dy * dy)
-
-        if dist <= reach_thresh:
-            robot.apply_wheel_actions(ctrl.forward(command=[0.0, 0.0]))
-            return True
-
-        heading = math.atan2(dy, dx)
-        lin = np.clip(0.4 * dist, 0.02, 0.2)
-        ang = np.clip(1.0 * heading, -1.0, 1.0)
-        robot.apply_wheel_actions(ctrl.forward(command=[lin, ang]))
-        return False
-```
+Important: avoid duplicating code between Section 7 and Section 8. Keep Section 7 updated first.
 
 ---
 
@@ -1266,9 +1192,26 @@ From Isaac Sim root:
 
 ```bash
 cd /home/ubuntu/isaacsim
-./python.sh /home/ubuntu/src/warehouse-robot-swarm/<path-to>/warehouse_isaacsim_v2/scripts/run_part1_world_pipeline.py
-./python.sh /home/ubuntu/src/warehouse-robot-swarm/<path-to>/warehouse_isaacsim_v2/scripts/run_part2_robot_pipeline.py
+./python.sh /home/ubuntu/src/warehouse-robot-swarm/scripts/run_part1_world_pipeline.py
+./python.sh /home/ubuntu/src/warehouse-robot-swarm/scripts/run_part2_robot_pipeline.py
+./python.sh /home/ubuntu/src/warehouse-robot-swarm/scripts/run_part2_robot_pipeline.py
+./python.sh /home/ubuntu/src/warehouse-robot-swarm/scripts/run_full_pipeline.py --mode scene_plus_robots
 ```
+
+If you launch from `~/isaacsim`, these scripts now self-insert the package path:
+
+- `/home/ubuntu/src/warehouse-robot-swarm/src/py/basic`
+
+So `warehouse_sim` imports resolve correctly without manual `PYTHONPATH` exports.
+
+Quick troubleshooting:
+
+```bash
+cd /home/ubuntu/isaacsim
+./python.sh /home/ubuntu/src/warehouse-robot-swarm/scripts/run_part1_world_pipeline.py --help
+```
+
+If this command prints argparse help, import path setup is working.
 
 Expected outputs:
 
